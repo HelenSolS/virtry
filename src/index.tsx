@@ -3,7 +3,7 @@ import { cors } from 'hono/cors'
 import { renderer } from './renderer'
 
 type Bindings = {
-  REPLICATE_API_TOKEN?: string
+  GOOGLE_API_KEY?: string
 }
 
 const app = new Hono<{ Bindings: Bindings }>()
@@ -106,7 +106,7 @@ app.get('/', (c) => {
   )
 })
 
-// API endpoint for virtual try-on with Replicate IDM-VTON
+// API endpoint for virtual try-on with Gemini 2.5 Flash IMAGE (Nano Banana)
 app.post('/api/tryon', async (c) => {
   try {
     const formData = await c.req.formData()
@@ -118,108 +118,103 @@ app.post('/api/tryon', async (c) => {
     }
 
     // Check if API key is configured
-    const apiToken = c.env.REPLICATE_API_TOKEN
-    if (!apiToken) {
+    const apiKey = c.env.GOOGLE_API_KEY
+    if (!apiKey) {
       return c.json({ 
-        error: 'API ключ не настроен. Установите REPLICATE_API_TOKEN в переменных окружения.' 
+        error: 'API ключ не настроен. Установите GOOGLE_API_KEY в переменных окружения.' 
       }, 500)
     }
 
-    // Convert files to base64 data URLs for Replicate
-    const fileToDataURL = async (file: File): Promise<string> => {
+    // Convert files to base64 - simple approach for Gemini API
+    const fileToBase64 = async (file: File): Promise<string> => {
       const arrayBuffer = await file.arrayBuffer()
-      const base64 = btoa(
-        new Uint8Array(arrayBuffer).reduce(
-          (data, byte) => data + String.fromCharCode(byte),
-          ''
-        )
-      )
-      return `data:${file.type};base64,${base64}`
+      const bytes = new Uint8Array(arrayBuffer)
+      // Use reduce to avoid stack overflow
+      const binary = bytes.reduce((acc, byte) => acc + String.fromCharCode(byte), '')
+      return btoa(binary)
     }
 
-    const photoDataURL = await fileToDataURL(photoFile)
-    const outfitDataURL = await fileToDataURL(outfitFile)
+    const photoBase64 = await fileToBase64(photoFile)
+    const outfitBase64 = await fileToBase64(outfitFile)
 
-    // Create prediction with Replicate IDM-VTON model
-    const predictionResponse = await fetch('https://api.replicate.com/v1/predictions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${apiToken}`,
-        'Content-Type': 'application/json',
-        'Prefer': 'wait'
-      },
-      body: JSON.stringify({
-        version: 'c871bb9b046607b680449ecbae55fd8c6d945e0a1948644bf2361b3d021d3ff4',
-        input: {
-          garm_img: outfitDataURL,
-          vton_img: photoDataURL,
-          n_samples: 1,
-          n_steps: 20,
-          image_scale: 768,
-          seed: -1
-        }
-      })
-    })
+    // Use Gemini 2.5 Flash IMAGE for virtual try-on
+    // This is image-to-image generation model
+    const prompt = `Virtual try-on task:
 
-    if (!predictionResponse.ok) {
-      const errorData = await predictionResponse.json()
-      return c.json({ 
-        error: 'Ошибка Replicate API', 
-        details: errorData 
-      }, predictionResponse.status)
-    }
+IMAGE 1 (Person): Shows a person in their current clothing
+IMAGE 2 (Outfit): Shows the clothing/outfit to apply
 
-    const prediction = await predictionResponse.json()
+TASK: Apply the outfit from IMAGE 2 onto the person from IMAGE 1.
 
-    // Wait for prediction to complete (with timeout)
-    let result = prediction
-    let attempts = 0
-    const maxAttempts = 60 // 60 seconds timeout
+REQUIREMENTS:
+- Keep the person's face, body shape, pose, and background EXACTLY the same
+- Only change the clothing to match IMAGE 2
+- Make it look natural and realistic
+- Maintain consistent lighting and shadows
+- Preserve all body proportions
+- Ensure the outfit fits the person's body naturally
 
-    while (result.status !== 'succeeded' && result.status !== 'failed' && attempts < maxAttempts) {
-      await new Promise(resolve => setTimeout(resolve, 1000))
-      
-      const statusResponse = await fetch(
-        `https://api.replicate.com/v1/predictions/${result.id}`,
-        {
-          headers: {
-            'Authorization': `Bearer ${apiToken}`,
+Generate a photorealistic image showing the person wearing the new outfit.`
+
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image:generateContent`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-goog-api-key': apiKey
+        },
+        body: JSON.stringify({
+          contents: [{
+            parts: [
+              { text: prompt },
+              {
+                inlineData: {
+                  mimeType: photoFile.type,
+                  data: photoBase64
+                }
+              },
+              {
+                inlineData: {
+                  mimeType: outfitFile.type,
+                  data: outfitBase64
+                }
+              }
+            ]
+          }],
+          generationConfig: {
+            responseModalities: ['IMAGE'],
+            temperature: 0.4
           }
-        }
-      )
-
-      if (!statusResponse.ok) {
-        return c.json({ error: 'Не удалось получить статус' }, 500)
+        })
       }
+    )
 
-      result = await statusResponse.json()
-      attempts++
-    }
-
-    if (result.status === 'failed') {
+    if (!response.ok) {
+      const errorData = await response.json()
       return c.json({ 
-        error: 'Генерация не удалась', 
-        details: result.error 
-      }, 500)
+        error: 'Ошибка Gemini API', 
+        details: errorData 
+      }, response.status)
     }
 
-    if (result.status !== 'succeeded') {
-      return c.json({ 
-        error: 'Превышено время ожидания' 
-      }, 504)
-    }
+    const data = await response.json()
 
-    // Return the generated image URL
-    if (result.output && result.output.length > 0) {
-      return c.json({
-        success: true,
-        image: result.output[0]
-      })
+    // Extract generated image from response
+    if (data.candidates && data.candidates[0]?.content?.parts) {
+      for (const part of data.candidates[0].content.parts) {
+        if (part.inlineData) {
+          return c.json({
+            success: true,
+            image: `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`
+          })
+        }
+      }
     }
 
     return c.json({ 
       error: 'Не удалось получить результат',
-      details: result 
+      details: data 
     }, 500)
 
   } catch (error: any) {
