@@ -3,7 +3,7 @@ import { cors } from 'hono/cors'
 import { renderer } from './renderer'
 
 type Bindings = {
-  GOOGLE_API_KEY?: string
+  REPLICATE_API_TOKEN?: string
 }
 
 const app = new Hono<{ Bindings: Bindings }>()
@@ -106,7 +106,7 @@ app.get('/', (c) => {
   )
 })
 
-// API endpoint for virtual try-on
+// API endpoint for virtual try-on with Replicate IDM-VTON
 app.post('/api/tryon', async (c) => {
   try {
     const formData = await c.req.formData()
@@ -114,147 +114,118 @@ app.post('/api/tryon', async (c) => {
     const outfitFile = formData.get('outfit') as File
 
     if (!photoFile || !outfitFile) {
-      return c.json({ error: 'Both images are required' }, 400)
+      return c.json({ error: 'Требуются оба изображения' }, 400)
     }
 
     // Check if API key is configured
-    const apiKey = c.env.GOOGLE_API_KEY
-    if (!apiKey) {
+    const apiToken = c.env.REPLICATE_API_TOKEN
+    if (!apiToken) {
       return c.json({ 
-        error: 'API key not configured. Please set GOOGLE_API_KEY in your environment variables.' 
+        error: 'API ключ не настроен. Установите REPLICATE_API_TOKEN в переменных окружения.' 
       }, 500)
     }
 
-    // Convert files to base64 (proper way for Workers)
-    const photoBuffer = await photoFile.arrayBuffer()
-    const outfitBuffer = await outfitFile.arrayBuffer()
-    
-    // Helper function to convert ArrayBuffer to base64
-    const arrayBufferToBase64 = (buffer: ArrayBuffer): string => {
-      const bytes = new Uint8Array(buffer)
-      let binary = ''
-      const chunkSize = 0x8000 // 32KB chunks to avoid stack overflow
-      for (let i = 0; i < bytes.length; i += chunkSize) {
-        const chunk = bytes.subarray(i, Math.min(i + chunkSize, bytes.length))
-        binary += String.fromCharCode.apply(null, Array.from(chunk))
-      }
-      return btoa(binary)
+    // Convert files to base64 data URLs for Replicate
+    const fileToDataURL = async (file: File): Promise<string> => {
+      const arrayBuffer = await file.arrayBuffer()
+      const base64 = btoa(
+        new Uint8Array(arrayBuffer).reduce(
+          (data, byte) => data + String.fromCharCode(byte),
+          ''
+        )
+      )
+      return `data:${file.type};base64,${base64}`
     }
-    
-    const photoBase64 = arrayBufferToBase64(photoBuffer)
-    const outfitBase64 = arrayBufferToBase64(outfitBuffer)
 
-    // Import Google AI SDK
-    const { google } = await import('@ai-sdk/google')
-    const { generateImage } = await import('ai')
+    const photoDataURL = await fileToDataURL(photoFile)
+    const outfitDataURL = await fileToDataURL(outfitFile)
 
-    // First, describe the outfit from photo B
-    const describePrompt = `Photo B shows clothing/outfit. Describe it in JSON format with these fields:
-{
-  "garment_type": "type of clothing",
-  "style": "style description",
-  "colors": ["dominant colors"],
-  "patterns": "patterns or prints",
-  "details": "notable details"
-}`
-
-    // Step 1: Describe the outfit
-    const descriptionResponse = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key=${apiKey}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [{
-            parts: [
-              { text: describePrompt },
-              { 
-                inlineData: { 
-                  mimeType: outfitFile.type,
-                  data: outfitBase64 
-                } 
-              }
-            ]
-          }]
-        })
-      }
-    )
-
-    const descriptionData = await descriptionResponse.json()
-    const outfitDescription = descriptionData.candidates?.[0]?.content?.parts?.[0]?.text || 'casual outfit'
-
-    // Step 2: Generate the try-on image with detailed prompt
-    const tryonPrompt = `PHOTO A: Person in their original photo
-PHOTO B: Outfit/clothing to apply
-
-TASK: Take the outfit from PHOTO B and apply it to the person in PHOTO A.
-
-REQUIREMENTS:
-- Keep the person's face, body type, pose, and background from PHOTO A EXACTLY the same
-- Only change the clothing to match PHOTO B
-- Make it look natural and realistic
-- Maintain consistent lighting and shadows
-- Preserve all body proportions
-
-OUTFIT DESCRIPTION from PHOTO B:
-${outfitDescription}
-
-Generate a photorealistic image showing the person from PHOTO A wearing the outfit from PHOTO B.`
-
-    const imageResponse = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key=${apiKey}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [{
-            parts: [
-              { text: tryonPrompt },
-              { 
-                inlineData: { 
-                  mimeType: photoFile.type,
-                  data: photoBase64 
-                } 
-              },
-              { 
-                inlineData: { 
-                  mimeType: outfitFile.type,
-                  data: outfitBase64 
-                } 
-              }
-            ]
-          }],
-          generationConfig: {
-            temperature: 0.4,
-            topK: 32,
-            topP: 1,
-            maxOutputTokens: 4096
-          }
-        })
-      }
-    )
-
-    const imageData = await imageResponse.json()
-    
-    // Extract generated image
-    if (imageData.candidates && imageData.candidates[0]?.content?.parts) {
-      const parts = imageData.candidates[0].content.parts
-      for (const part of parts) {
-        if (part.inlineData) {
-          return c.json({
-            success: true,
-            image: `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`
-          })
+    // Create prediction with Replicate IDM-VTON model
+    const predictionResponse = await fetch('https://api.replicate.com/v1/predictions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiToken}`,
+        'Content-Type': 'application/json',
+        'Prefer': 'wait'
+      },
+      body: JSON.stringify({
+        version: 'c871bb9b046607b680449ecbae55fd8c6d945e0a1948644bf2361b3d021d3ff4',
+        input: {
+          garm_img: outfitDataURL,
+          vton_img: photoDataURL,
+          n_samples: 1,
+          n_steps: 20,
+          image_scale: 768,
+          seed: -1
         }
-      }
+      })
+    })
+
+    if (!predictionResponse.ok) {
+      const errorData = await predictionResponse.json()
+      return c.json({ 
+        error: 'Ошибка Replicate API', 
+        details: errorData 
+      }, predictionResponse.status)
     }
 
-    return c.json({ error: 'Failed to generate image', details: imageData }, 500)
+    const prediction = await predictionResponse.json()
+
+    // Wait for prediction to complete (with timeout)
+    let result = prediction
+    let attempts = 0
+    const maxAttempts = 60 // 60 seconds timeout
+
+    while (result.status !== 'succeeded' && result.status !== 'failed' && attempts < maxAttempts) {
+      await new Promise(resolve => setTimeout(resolve, 1000))
+      
+      const statusResponse = await fetch(
+        `https://api.replicate.com/v1/predictions/${result.id}`,
+        {
+          headers: {
+            'Authorization': `Bearer ${apiToken}`,
+          }
+        }
+      )
+
+      if (!statusResponse.ok) {
+        return c.json({ error: 'Не удалось получить статус' }, 500)
+      }
+
+      result = await statusResponse.json()
+      attempts++
+    }
+
+    if (result.status === 'failed') {
+      return c.json({ 
+        error: 'Генерация не удалась', 
+        details: result.error 
+      }, 500)
+    }
+
+    if (result.status !== 'succeeded') {
+      return c.json({ 
+        error: 'Превышено время ожидания' 
+      }, 504)
+    }
+
+    // Return the generated image URL
+    if (result.output && result.output.length > 0) {
+      return c.json({
+        success: true,
+        image: result.output[0]
+      })
+    }
+
+    return c.json({ 
+      error: 'Не удалось получить результат',
+      details: result 
+    }, 500)
 
   } catch (error: any) {
     console.error('Try-on error:', error)
     return c.json({ 
-      error: 'Failed to process images', 
+      error: 'Ошибка обработки изображений', 
       details: error.message 
     }, 500)
   }

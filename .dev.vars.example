@@ -1,3 +1,3 @@
-# Google API Key for Gemini 2.0 Flash (Nano Banana)
-# Get your API key from: https://aistudio.google.com/apikey
-GOOGLE_API_KEY=your_google_api_key_here
+# Replicate API Token for IDM-VTON virtual try-on
+# Get your API key from: https://replicate.com/account/api-tokens
+REPLICATE_API_TOKEN=r8_your_replicate_api_token_here

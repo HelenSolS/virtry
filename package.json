@@ -18,7 +18,8 @@
   "dependencies": {
     "@ai-sdk/google": "^3.0.20",
     "ai": "^6.0.69",
-    "hono": "^4.11.7"
+    "hono": "^4.11.7",
+    "replicate": "^1.4.0"
   },
   "devDependencies": {
     "@hono/vite-build": "^1.2.0",
