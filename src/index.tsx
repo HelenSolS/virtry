@@ -125,12 +125,24 @@ app.post('/api/tryon', async (c) => {
       }, 500)
     }
 
-    // Convert files to base64
+    // Convert files to base64 (proper way for Workers)
     const photoBuffer = await photoFile.arrayBuffer()
     const outfitBuffer = await outfitFile.arrayBuffer()
     
-    const photoBase64 = btoa(String.fromCharCode(...new Uint8Array(photoBuffer)))
-    const outfitBase64 = btoa(String.fromCharCode(...new Uint8Array(outfitBuffer)))
+    // Helper function to convert ArrayBuffer to base64
+    const arrayBufferToBase64 = (buffer: ArrayBuffer): string => {
+      const bytes = new Uint8Array(buffer)
+      let binary = ''
+      const chunkSize = 0x8000 // 32KB chunks to avoid stack overflow
+      for (let i = 0; i < bytes.length; i += chunkSize) {
+        const chunk = bytes.subarray(i, Math.min(i + chunkSize, bytes.length))
+        binary += String.fromCharCode.apply(null, Array.from(chunk))
+      }
+      return btoa(binary)
+    }
+    
+    const photoBase64 = arrayBufferToBase64(photoBuffer)
+    const outfitBase64 = arrayBufferToBase64(outfitBuffer)
 
     // Import Google AI SDK
     const { google } = await import('@ai-sdk/google')
