@@ -125,12 +125,19 @@ app.post('/api/tryon', async (c) => {
       }, 500)
     }
 
-    // Convert files to base64 - simple approach for Gemini API
+    // Convert files to base64 using TextDecoder approach
     const fileToBase64 = async (file: File): Promise<string> => {
       const arrayBuffer = await file.arrayBuffer()
       const bytes = new Uint8Array(arrayBuffer)
-      // Use reduce to avoid stack overflow
-      const binary = bytes.reduce((acc, byte) => acc + String.fromCharCode(byte), '')
+      
+      // Convert to string in chunks to avoid stack overflow
+      let binary = ''
+      const chunkSize = 8192 // 8KB chunks
+      for (let i = 0; i < bytes.length; i += chunkSize) {
+        const chunk = bytes.slice(i, Math.min(i + chunkSize, bytes.length))
+        binary += String.fromCharCode(...chunk)
+      }
+      
       return btoa(binary)
     }
 
@@ -200,28 +207,81 @@ Generate a photorealistic image showing the person wearing the new outfit.`
 
     const data = await response.json()
 
+    // Check for common API errors
+    if (data.error) {
+      console.error('Gemini API error:', data.error)
+      return c.json({ 
+        error: 'Ошибка API генерации изображений',
+        message: 'Сервис временно недоступен. Попробуйте позже.',
+        details: data.error 
+      }, 500)
+    }
+
+    // Check if response contains safety filters or blocked content
+    if (data.candidates && data.candidates[0]?.finishReason) {
+      const reason = data.candidates[0].finishReason
+      if (reason === 'SAFETY' || reason === 'BLOCKED_REASON') {
+        return c.json({ 
+          error: 'Контент заблокирован',
+          message: 'Изображения не прошли проверку безопасности. Попробуйте другие фото.',
+          finishReason: reason
+        }, 400)
+      }
+    }
+
     // Extract generated image from response
     if (data.candidates && data.candidates[0]?.content?.parts) {
       for (const part of data.candidates[0].content.parts) {
         if (part.inlineData) {
+          const generatedImage = part.inlineData.data
+          
+          // Check if generated image is suspiciously similar to input
+          // (This is a basic check - in production you'd use image comparison libraries)
+          const inputPhotoHash = photoBase64.substring(0, 100)
+          const outputHash = generatedImage.substring(0, 100)
+          
+          if (inputPhotoHash === outputHash) {
+            return c.json({
+              error: 'Результат идентичен входному изображению',
+              message: 'AI не смог обработать изображения корректно. Попробуйте другие фото или повторите позже.',
+              warning: 'same_as_input'
+            }, 400)
+          }
+          
           return c.json({
             success: true,
-            image: `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`
+            image: `data:${part.inlineData.mimeType};base64,${generatedImage}`
           })
         }
       }
     }
 
+    // No image in response
     return c.json({ 
       error: 'Не удалось получить результат',
+      message: 'Сервис не вернул изображение. Попробуйте позже.',
       details: data 
     }, 500)
 
   } catch (error: any) {
     console.error('Try-on error:', error)
+    
+    // Provide user-friendly error messages
+    let userMessage = 'Произошла ошибка при обработке изображений. Попробуйте позже.'
+    
+    if (error.message?.includes('fetch')) {
+      userMessage = 'Не удалось подключиться к сервису AI. Проверьте подключение.'
+    } else if (error.message?.includes('timeout')) {
+      userMessage = 'Превышено время ожидания. Попробуйте уменьшить размер изображений.'
+    } else if (error.message?.includes('stack')) {
+      userMessage = 'Изображения слишком большие. Попробуйте меньшего размера (до 2MB).'
+    }
+    
     return c.json({ 
-      error: 'Ошибка обработки изображений', 
-      details: error.message 
+      error: 'Ошибка обработки',
+      message: userMessage,
+      details: error.message,
+      support: 'Если проблема повторяется, попробуйте другие изображения или обратитесь к администратору.'
     }, 500)
   }
 })

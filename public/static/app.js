@@ -155,10 +155,18 @@ async function handleGenerate() {
     const data = await response.json();
 
     if (!response.ok) {
-      throw new Error(data.error || 'Ошибка при обработке изображений');
+      // Extract user-friendly error message
+      const errorMsg = data.message || data.error || 'Ошибка при обработке изображений';
+      const supportMsg = data.support ? '\n' + data.support : '';
+      throw new Error(errorMsg + supportMsg);
     }
 
     if (data.success && data.image) {
+      // Check if image is valid
+      if (!data.image.startsWith('data:image/')) {
+        throw new Error('Получен некорректный формат изображения. Попробуйте ещё раз.');
+      }
+      
       // Show result
       resultPreview.src = data.image;
       resultPreview.style.display = 'block';
@@ -166,13 +174,29 @@ async function handleGenerate() {
       
       // Scroll to result
       resultArea.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    } else if (data.warning === 'same_as_input') {
+      // Special handling for identical images
+      throw new Error(data.message || 'AI вернул то же изображение. Попробуйте другие фото.');
     } else {
-      throw new Error('Не удалось сгенерировать изображение');
+      throw new Error(data.message || 'Не удалось сгенерировать изображение. Попробуйте позже.');
     }
 
   } catch (error) {
     console.error('Generation error:', error);
-    showError(error.message || 'Произошла ошибка при обработке изображений');
+    
+    // Show user-friendly error
+    let errorMsg = error.message || 'Произошла ошибка при обработке изображений';
+    
+    // Add helpful suggestions
+    if (errorMsg.includes('одинаковые') || errorMsg.includes('идентичен')) {
+      errorMsg += '\n\nСоветы:\n• Попробуйте другие фотографии\n• Убедитесь, что одежда хорошо видна\n• Используйте фото с хорошим освещением';
+    } else if (errorMsg.includes('большие')) {
+      errorMsg += '\n\nСоветы:\n• Сожмите изображения перед загрузкой\n• Рекомендуемый размер: до 2MB\n• Используйте онлайн-компрессоры';
+    } else if (errorMsg.includes('безопасности')) {
+      errorMsg += '\n\nСоветы:\n• Используйте качественные фотографии\n• Избегайте неподходящего контента\n• Попробуйте другие изображения';
+    }
+    
+    showError(errorMsg);
     loadingSpinner.style.display = 'none';
     resultArea.querySelector('.result-placeholder').style.display = 'flex';
   } finally {
@@ -182,9 +206,15 @@ async function handleGenerate() {
 }
 
 function showError(message) {
-  errorMessage.textContent = message;
+  // Convert line breaks to HTML breaks
+  errorMessage.innerHTML = message.replace(/\n/g, '<br>');
   errorMessage.style.display = 'block';
+  
+  // Scroll to error message
+  errorMessage.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  
+  // Auto-hide after 10 seconds (increased for longer messages)
   setTimeout(() => {
     errorMessage.style.display = 'none';
-  }, 5000);
+  }, 10000);
 }

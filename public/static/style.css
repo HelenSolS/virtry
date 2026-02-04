@@ -300,13 +300,28 @@ body {
 /* Error Message */
 .error-message {
   margin-top: 2rem;
-  padding: 1rem;
-  background: #fed7d7;
-  border: 1px solid #fc8181;
-  border-radius: 0.5rem;
+  padding: 1.5rem;
+  background: linear-gradient(135deg, #fff5f5 0%, #fed7d7 100%);
+  border: 2px solid #fc8181;
+  border-radius: 1rem;
   color: #c53030;
-  text-align: center;
+  text-align: left;
   font-weight: 500;
+  font-size: 1rem;
+  line-height: 1.6;
+  box-shadow: 0 4px 15px rgba(252, 129, 129, 0.2);
+  animation: slideIn 0.3s ease-out;
+}
+
+@keyframes slideIn {
+  from {
+    opacity: 0;
+    transform: translateY(-20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 /* Responsive */
