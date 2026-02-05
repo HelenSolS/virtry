@@ -3,7 +3,8 @@ import { cors } from 'hono/cors'
 import { renderer } from './renderer'
 
 type Bindings = {
-  GOOGLE_API_KEY?: string
+  GATEWAY_URL?: string
+  GATEWAY_TOKEN?: string
 }
 
 const app = new Hono<{ Bindings: Bindings }>()
@@ -106,7 +107,7 @@ app.get('/', (c) => {
   )
 })
 
-// API endpoint for virtual try-on with Gemini 2.5 Flash IMAGE (Nano Banana)
+// API endpoint for virtual try-on via Cloudflare AI Gateway
 app.post('/api/tryon', async (c) => {
   try {
     const formData = await c.req.formData()
@@ -117,15 +118,18 @@ app.post('/api/tryon', async (c) => {
       return c.json({ error: 'Требуются оба изображения' }, 400)
     }
 
-    // Check if API key is configured
-    const apiKey = c.env.GOOGLE_API_KEY
-    if (!apiKey) {
+    // Check if Gateway is configured
+    const gatewayUrl = c.env.GATEWAY_URL
+    const gatewayToken = c.env.GATEWAY_TOKEN
+    
+    if (!gatewayUrl || !gatewayToken) {
       return c.json({ 
-        error: 'API ключ не настроен. Установите GOOGLE_API_KEY в переменных окружения.' 
+        error: 'Gateway не настроен',
+        message: 'Установите GATEWAY_URL и GATEWAY_TOKEN в переменных окружения.' 
       }, 500)
     }
 
-    // Convert files to base64 using TextDecoder approach
+    // Convert files to base64
     const fileToBase64 = async (file: File): Promise<string> => {
       const arrayBuffer = await file.arrayBuffer()
       const bytes = new Uint8Array(arrayBuffer)
@@ -144,18 +148,100 @@ app.post('/api/tryon', async (c) => {
     const photoBase64 = await fileToBase64(photoFile)
     const outfitBase64 = await fileToBase64(outfitFile)
 
-    // Use Gemini 2.5 Flash IMAGE for virtual try-on
-    // This is image-to-image generation model
-    const prompt = `Virtual try-on task:
+    // ========================================
+    // STEP 1: Get JSON description of outfit (PHOTO B)
+    // ========================================
+    console.log('Step 1: Describing outfit from PHOTO B...')
+    
+    const describePrompt = `Analyze this clothing image and provide a detailed JSON description.
 
-IMAGE 1 (Person): Shows a person in their current clothing
-IMAGE 2 (Outfit): Shows the clothing/outfit to apply
+Return ONLY valid JSON in this exact format:
+{
+  "garment_type": "type of clothing (e.g., dress, shirt, pants, jacket)",
+  "color": "primary color(s)",
+  "style": "style description (e.g., casual, formal, sporty, elegant)",
+  "fit": "fit type (e.g., slim, loose, fitted, oversized)",
+  "details": "notable features (e.g., buttons, patterns, sleeves, collar)"
+}`
 
-TASK: Apply the outfit from IMAGE 2 onto the person from IMAGE 1.
+    const describeResponse = await fetch(gatewayUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${gatewayToken}`
+      },
+      body: JSON.stringify({
+        contents: [{
+          parts: [
+            { text: describePrompt },
+            {
+              inlineData: {
+                mimeType: outfitFile.type,
+                data: outfitBase64
+              }
+            }
+          ]
+        }],
+        generationConfig: {
+          temperature: 0.3,
+          topK: 32,
+          topP: 1
+        }
+      })
+    })
+
+    if (!describeResponse.ok) {
+      const errorData = await describeResponse.json()
+      console.error('Step 1 error:', errorData)
+      return c.json({ 
+        error: 'Ошибка Gateway (описание одежды)', 
+        message: 'Не удалось описать одежду. Попробуйте другое изображение.',
+        details: errorData 
+      }, describeResponse.status)
+    }
+
+    const describeData = await describeResponse.json()
+    
+    // Extract outfit description
+    let outfitDescription = '{"garment_type": "casual outfit", "color": "unknown", "style": "casual", "fit": "regular", "details": "none"}'
+    try {
+      if (describeData.candidates && describeData.candidates[0]?.content?.parts) {
+        const textPart = describeData.candidates[0].content.parts.find((p: any) => p.text)
+        if (textPart && textPart.text) {
+          // Try to extract JSON
+          const jsonMatch = textPart.text.match(/\{[\s\S]*\}/)
+          if (jsonMatch) {
+            outfitDescription = jsonMatch[0]
+            console.log('Extracted outfit description:', outfitDescription)
+          } else {
+            console.warn('No JSON found in response, using text as-is')
+            outfitDescription = textPart.text
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('Could not parse outfit description:', e)
+    }
+
+    // ========================================
+    // STEP 2: Generate try-on image with description
+    // ========================================
+    console.log('Step 2: Generating virtual try-on image...')
+    
+    const tryonPrompt = `Virtual try-on task:
+
+PHOTO A (Person): The person who will try on the outfit.
+PHOTO B (Outfit): The target clothing to apply.
+
+OUTFIT DESCRIPTION from PHOTO B:
+${outfitDescription}
+
+TASK: Apply the outfit from PHOTO B onto the person from PHOTO A.
 
 REQUIREMENTS:
 - Keep the person's face, body shape, pose, and background EXACTLY the same
-- Only change the clothing to match IMAGE 2
+- Only change the clothing to match PHOTO B and its description
+- Use the outfit description to ensure accuracy of garment type, color, style, fit, and details
 - Make it look natural and realistic
 - Maintain consistent lighting and shadows
 - Preserve all body proportions
@@ -163,49 +249,50 @@ REQUIREMENTS:
 
 Generate a photorealistic image showing the person wearing the new outfit.`
 
-    const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image:generateContent`,
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-goog-api-key': apiKey
-        },
-        body: JSON.stringify({
-          contents: [{
-            parts: [
-              { text: prompt },
-              {
-                inlineData: {
-                  mimeType: photoFile.type,
-                  data: photoBase64
-                }
-              },
-              {
-                inlineData: {
-                  mimeType: outfitFile.type,
-                  data: outfitBase64
-                }
+    const tryonResponse = await fetch(gatewayUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${gatewayToken}`
+      },
+      body: JSON.stringify({
+        contents: [{
+          parts: [
+            { text: tryonPrompt },
+            {
+              inlineData: {
+                mimeType: photoFile.type,
+                data: photoBase64
               }
-            ]
-          }],
-          generationConfig: {
-            responseModalities: ['IMAGE'],
-            temperature: 0.4
-          }
-        })
-      }
-    )
+            },
+            {
+              inlineData: {
+                mimeType: outfitFile.type,
+                data: outfitBase64
+              }
+            }
+          ]
+        }],
+        generationConfig: {
+          responseModalities: ['IMAGE'],
+          temperature: 0.4,
+          topK: 32,
+          topP: 1
+        }
+      })
+    })
 
-    if (!response.ok) {
-      const errorData = await response.json()
+    if (!tryonResponse.ok) {
+      const errorData = await tryonResponse.json()
+      console.error('Step 2 error:', errorData)
       return c.json({ 
-        error: 'Ошибка Gemini API', 
+        error: 'Ошибка Gateway (генерация изображения)', 
+        message: 'Не удалось сгенерировать результат. Попробуйте позже.',
         details: errorData 
-      }, response.status)
+      }, tryonResponse.status)
     }
 
-    const data = await response.json()
+    const data = await tryonResponse.json()
 
     // Check for common API errors
     if (data.error) {
@@ -236,7 +323,6 @@ Generate a photorealistic image showing the person wearing the new outfit.`
           const generatedImage = part.inlineData.data
           
           // Check if generated image is suspiciously similar to input
-          // (This is a basic check - in production you'd use image comparison libraries)
           const inputPhotoHash = photoBase64.substring(0, 100)
           const outputHash = generatedImage.substring(0, 100)
           
@@ -250,7 +336,8 @@ Generate a photorealistic image showing the person wearing the new outfit.`
           
           return c.json({
             success: true,
-            image: `data:${part.inlineData.mimeType};base64,${generatedImage}`
+            image: `data:${part.inlineData.mimeType};base64,${generatedImage}`,
+            outfitDescription: outfitDescription
           })
         }
       }

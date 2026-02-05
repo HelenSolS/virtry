@@ -1,3 +1,10 @@
-# Replicate API Token for IDM-VTON virtual try-on
-# Get your API key from: https://replicate.com/account/api-tokens
-REPLICATE_API_TOKEN=r8_your_replicate_api_token_here
+# Cloudflare AI Gateway Configuration
+# Replace with your actual Gateway URL and Token
+
+# Gateway URL from Cloudflare Dashboard
+# Format: https://gateway.ai.cloudflare.com/v1/{account_id}/{gateway_id}/google-ai-studio/v1beta/models/gemini-1.5-flash:generateContent
+GATEWAY_URL=your_cloudflare_gateway_url_here
+
+# Gateway Token for authentication
+# Get this from Cloudflare Dashboard → AI Gateway → Your Gateway → Settings
+GATEWAY_TOKEN=your_cloudflare_gateway_token_here
