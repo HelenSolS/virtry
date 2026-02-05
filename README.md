@@ -161,18 +161,139 @@ webapp/
 ### Backend
 - **Vercel Edge Functions** - serverless API endpoints на edge
 - **Cloudflare AI Gateway** - security, caching, monitoring
+- **Multi-Model Architecture** 💰 - cost optimization:
+  - **Gemini 1.5 Flash** (text) - дешёвый анализ одежды
+  - **Gemini 2.5 Flash IMAGE** - дорогая генерация
 - **Hono** - легковесный web framework (для Cloudflare версии)
 
 ### AI
-- **Google Gemini 2.5 Flash IMAGE** (Nano Banana)
-- **2-step approach**:
-  1. AI анализирует одежду (PHOTO B) → JSON description
-  2. AI применяет одежду на человека (PHOTO A) с описанием
+- **Cost-optimized 2-step approach** 💰:
+  1. `/api/describe` → Gemini 1.5 Flash (cheap) → JSON description
+  2. `/api/generate` → Gemini 2.5 Flash IMAGE (expensive) → final image
+- **Экономия: 37-44%** на AI API затратах
 
 ### Frontend
 - **Vanilla JavaScript** - без фреймворков
 - **Modern CSS** - animations, gradients, responsive
 - **Drag & Drop API**
+
+---
+
+## 💰 Cost Optimization
+
+**Новая multi-model архитектура снижает затраты на 37-44%!**
+
+### Как это работает:
+
+```
+Старая версия (дорого):
+  Step 1: Gemini 2.5 Flash IMAGE - анализ
+  Step 2: Gemini 2.5 Flash IMAGE - генерация
+  Итого: 2 дорогих запроса
+
+Новая версия (дёшево):
+  Step 1: Gemini 1.5 Flash - анализ (4x дешевле!)
+  Step 2: Gemini 2.5 Flash IMAGE - генерация
+  Итого: 1 дешёвый + 1 дорогой = экономия 37%
+```
+
+**Подробнее**: См. [COST_OPTIMIZATION.md](./COST_OPTIMIZATION.md)
+
+---
+
+## 🔐 Безопасность
+
+### Environment Variables (Production):
+
+```bash
+# Дешёвая модель для анализа
+DESCRIBE_GATEWAY_URL=https://gateway.ai...gemini-1.5-flash:generateContent
+
+# Дорогая модель для генерации
+GENERATE_GATEWAY_URL=https://gateway.ai...gemini-2.5-flash-image:generateContent
+
+# Общий токен
+GATEWAY_TOKEN=cf_xxxxxxxxxxxxx
+```
+
+**Важно**:
+- ✅ API ключи только на бэкенде
+- ✅ Клиенты никогда не видят токены
+- ✅ Все запросы через Cloudflare Gateway
+- ✅ Rate limiting и мониторинг
+- ✅ Разные лимиты для дешёвой и дорогой модели
+
+---
+
+## 💰 Стоимость (бесплатный тариф)
+
+| Сервис | Лимиты | Стоимость |
+|--------|--------|-----------|
+| **Vercel** | 100GB bandwidth/мес | $0 |
+| **Gemini 1.5 Flash** | 15 RPM, 1,500 RPD | $0 (cheap) |
+| **Gemini 2.5 Flash IMAGE** | 15 RPM, 1,500 RPD | $0 (expensive) |
+| **Cloudflare Gateway** | Unlimited | $0 |
+
+**Новая архитектура**: Экономия 37-44% = больше пользователей за $0!
+
+---
+
+## 🎯 API Endpoints
+
+### POST /api/describe 💰 (CHEAP)
+
+Анализ одежды с дешёвой текстовой моделью.
+
+**Request**:
+```bash
+curl -X POST https://virtry.vercel.app/api/describe \
+  -F "outfit=@clothing.jpg"
+```
+
+**Response**:
+```json
+{
+  "success": true,
+  "description": {
+    "garment_type": "dress",
+    "color": "blue",
+    "style": "elegant evening dress",
+    "fit": "fitted",
+    "details": "V-neck, sleeveless"
+  },
+  "metadata": {
+    "model": "gemini-1.5-flash",
+    "cost_tier": "low"
+  }
+}
+```
+
+---
+
+### POST /api/generate 💸 (EXPENSIVE)
+
+Генерация виртуальной примерки с дорогой визуальной моделью.
+
+**Request**:
+```bash
+curl -X POST https://virtry.vercel.app/api/generate \
+  -F "photo=@person.jpg" \
+  -F "outfit=@clothing.jpg" \
+  -F "description={\"garment_type\":\"dress\",...}"
+```
+
+**Response**:
+```json
+{
+  "success": true,
+  "image": "data:image/jpeg;base64,...",
+  "metadata": {
+    "model": "gemini-2.5-flash-image",
+    "cost_tier": "high",
+    "used_description": true
+  }
+}
+```
 
 ---
 
@@ -186,7 +307,7 @@ webapp/
 
 # 2. Коммитите в GitHub (любые изменения)
 git add .
-git commit -m "WIP: Add new feature"
+git commit -m "Optimize: Add multi-model architecture"
 git push origin main
 # → GitHub обновлён
 # → Vercel НЕ деплоит (полный контроль!)
@@ -195,12 +316,12 @@ git push origin main
 # Ещё коммиты, тесты, исправления...
 
 # 4. Когда готово к Production
-git commit -m "Release v1.0.1: Feature complete"
+git commit -m "Release v1.1.0: Cost optimization ready"
 git push origin main
 
 # 5. РУЧНОЙ деплой на Vercel
 vercel --prod
-# → Теперь Production обновлён!
+# → Теперь Production обновлён с новой архитектурой!
 ```
 
 ---

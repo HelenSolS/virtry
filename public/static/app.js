@@ -138,25 +138,60 @@ async function handleGenerate() {
   resultArea.querySelector('.result-placeholder').style.display = 'none';
   resultPreview.style.display = 'none';
   loadingSpinner.style.display = 'flex';
+  loadingSpinner.querySelector('p').textContent = 'Анализируем одежду...';
   errorMessage.style.display = 'none';
 
   try {
-    // Prepare form data
-    const formData = new FormData();
-    formData.append('photo', photoFile);
-    formData.append('outfit', outfitFile);
+    // ========================================
+    // STEP 1: Analyze outfit (CHEAP model)
+    // ========================================
+    console.log('[STEP 1] Analyzing outfit with cheap text model...');
+    
+    const describeFormData = new FormData();
+    describeFormData.append('outfit', outfitFile);
 
-    // Send request
-    const response = await fetch('/api/tryon', {
+    const describeResponse = await fetch('/api/describe', {
       method: 'POST',
-      body: formData,
+      body: describeFormData,
+    });
+
+    const describeData = await describeResponse.json();
+
+    if (!describeResponse.ok) {
+      const errorMsg = describeData.message || describeData.error || 'Ошибка анализа одежды';
+      throw new Error(errorMsg);
+    }
+
+    if (!describeData.success || !describeData.description) {
+      throw new Error('Не удалось получить описание одежды');
+    }
+
+    console.log('[STEP 1] Outfit analyzed:', describeData.description);
+    console.log('[STEP 1] Cost tier:', describeData.metadata?.cost_tier);
+
+    // ========================================
+    // STEP 2: Generate try-on (EXPENSIVE model)
+    // ========================================
+    console.log('[STEP 2] Generating try-on with expensive image model...');
+    loadingSpinner.querySelector('p').textContent = 'Генерируем образ...';
+
+    const generateFormData = new FormData();
+    generateFormData.append('photo', photoFile);
+    generateFormData.append('outfit', outfitFile);
+    generateFormData.append('description', JSON.stringify(describeData.description));
+
+    const response = await fetch('/api/generate', {
+      method: 'POST',
+      body: generateFormData,
     });
 
     const data = await response.json();
 
+    console.log('[STEP 2] Cost tier:', data.metadata?.cost_tier);
+
     if (!response.ok) {
       // Extract user-friendly error message
-      const errorMsg = data.message || data.error || 'Ошибка при обработке изображений';
+      const errorMsg = data.message || data.error || 'Ошибка при генерации изображения';
       const supportMsg = data.support ? '\n' + data.support : '';
       throw new Error(errorMsg + supportMsg);
     }

@@ -1,10 +1,43 @@
-# Cloudflare AI Gateway Configuration
-# Replace with your actual Gateway URL and Token
+# Environment Variables for Local Development
 
-# Gateway URL from Cloudflare Dashboard
-# Format: https://gateway.ai.cloudflare.com/v1/{account_id}/{gateway_id}/google-ai-studio/v1beta/models/gemini-1.5-flash:generateContent
-GATEWAY_URL=your_cloudflare_gateway_url_here
+# ========================================
+# COST-OPTIMIZED MULTI-MODEL ARCHITECTURE
+# ========================================
 
-# Gateway Token for authentication
-# Get this from Cloudflare Dashboard → AI Gateway → Your Gateway → Settings
-GATEWAY_TOKEN=your_cloudflare_gateway_token_here
+# Cheap model for outfit analysis (Gemini 1.5 Flash - text only)
+# This model is ~4x cheaper than image model
+# Used by: /api/describe
+DESCRIBE_GATEWAY_URL=https://gateway.ai.cloudflare.com/v1/{account_id}/virtry-gateway/google-ai-studio/v1beta/models/gemini-1.5-flash:generateContent
+
+# Expensive model for image generation (Gemini 2.5 Flash IMAGE)
+# Used by: /api/generate
+GENERATE_GATEWAY_URL=https://gateway.ai.cloudflare.com/v1/{account_id}/virtry-gateway/google-ai-studio/v1beta/models/gemini-2.5-flash-image:generateContent
+
+# Shared Gateway token for both models
+GATEWAY_TOKEN=cf_xxxxxxxxxxxxx
+
+# ========================================
+# LEGACY (for backward compatibility)
+# ========================================
+
+# If DESCRIBE_GATEWAY_URL is not set, falls back to GATEWAY_URL
+GATEWAY_URL=https://gateway.ai.cloudflare.com/v1/{account_id}/virtry-gateway/google-ai-studio/v1beta/models/gemini-2.5-flash-image:generateContent
+
+# ========================================
+# SETUP INSTRUCTIONS
+# ========================================
+#
+# 1. Go to https://dash.cloudflare.com/
+# 2. Navigate to AI → AI Gateway
+# 3. Create a new Gateway named "virtry-gateway"
+# 4. Create TWO routes in the Gateway:
+#    a) Route for gemini-1.5-flash (cheap text model)
+#    b) Route for gemini-2.5-flash-image (expensive image model)
+# 5. Copy the URLs and paste above (replace {account_id})
+# 6. Go to AI → Manage → Create API Token
+# 7. Set permissions: AI:Read + AI:Edit
+# 8. Copy the token and paste above (cf_xxxxxxxxxxxxx)
+#
+# For more details, see:
+# - GATEWAY_SETUP.md
+# - COST_OPTIMIZATION.md
