@@ -107,13 +107,9 @@ REQUIREMENTS:
 
 Generate a photorealistic image showing the person wearing the new outfit.`;
 
-    const tryonResponse = await fetch(gatewayUrl, {
+    const tryonResponse = await fetch(apiUrl, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${gatewayToken}`,
-        'X-Cost-Optimization': 'generate-only' // Custom header for monitoring
-      },
+      headers: headers,
       body: JSON.stringify({
         contents: [{
           parts: [

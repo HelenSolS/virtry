@@ -31,22 +31,54 @@ export default async function handler(request) {
       );
     }
 
-    // Get Gateway credentials from environment
-    // DESCRIBE_GATEWAY_URL points to CHEAP text model (Gemini 1.5 Flash)
+    // Check if we should use direct API or Gateway
+    const useDirectAPI = process.env.USE_DIRECT_API === 'true';
+    const googleApiKey = process.env.GOOGLE_API_KEY;
     const gatewayUrl = process.env.DESCRIBE_GATEWAY_URL || process.env.GATEWAY_URL;
     const gatewayToken = process.env.GATEWAY_TOKEN;
     
-    if (!gatewayUrl || !gatewayToken) {
-      return new Response(
-        JSON.stringify({ 
-          error: 'Gateway не настроен',
-          message: 'Установите DESCRIBE_GATEWAY_URL и GATEWAY_TOKEN в переменных окружения.' 
-        }), 
-        { 
-          status: 500,
-          headers: { 'Content-Type': 'application/json' }
-        }
-      );
+    let apiUrl, headers;
+    
+    if (useDirectAPI) {
+      // Use direct Google API
+      if (!googleApiKey) {
+        return new Response(
+          JSON.stringify({ 
+            error: 'API не настроен',
+            message: 'Установите GOOGLE_API_KEY в переменных окружения.' 
+          }), 
+          { 
+            status: 500,
+            headers: { 'Content-Type': 'application/json' }
+          }
+        );
+      }
+      apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${googleApiKey}`;
+      headers = {
+        'Content-Type': 'application/json'
+      };
+      console.log('[DESCRIBE] Using DIRECT Google API (no Gateway)');
+    } else {
+      // Use Cloudflare Gateway
+      if (!gatewayUrl || !gatewayToken) {
+        return new Response(
+          JSON.stringify({ 
+            error: 'Gateway не настроен',
+            message: 'Установите DESCRIBE_GATEWAY_URL и GATEWAY_TOKEN в переменных окружения.' 
+          }), 
+          { 
+            status: 500,
+            headers: { 'Content-Type': 'application/json' }
+          }
+        );
+      }
+      apiUrl = gatewayUrl;
+      headers = {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${gatewayToken}`,
+        'X-Cost-Optimization': 'describe-only'
+      };
+      console.log('[DESCRIBE] Using Cloudflare Gateway');
     }
 
     // Convert file to base64
@@ -67,8 +99,6 @@ export default async function handler(request) {
 
     const outfitBase64 = await fileToBase64(outfitFile);
 
-    console.log('[DESCRIBE] Using cheap text model for outfit analysis');
-
     // Optimized prompt for text model
     const describePrompt = `Analyze this clothing image and provide a detailed JSON description.
 
@@ -83,13 +113,9 @@ Return ONLY valid JSON in this exact format:
 
 Be concise but accurate. This description will be used for virtual try-on generation.`;
 
-    const describeResponse = await fetch(gatewayUrl, {
+    const describeResponse = await fetch(apiUrl, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${gatewayToken}`,
-        'X-Cost-Optimization': 'describe-only' // Custom header for monitoring
-      },
+      headers: headers,
       body: JSON.stringify({
         contents: [{
           parts: [
