@@ -1,0 +1,11 @@
+# Vercel ignore
+node_modules
+.git
+.wrangler
+.dev.vars
+ecosystem.config.cjs
+wrangler.jsonc
+src
+public
+*.log
+.DS_Store
