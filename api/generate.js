@@ -42,22 +42,54 @@ export default async function handler(request) {
       outfitDescription = null;
     }
 
-    // Get Gateway credentials from environment
-    // GENERATE_GATEWAY_URL points to EXPENSIVE image model (Gemini 2.5 Flash IMAGE)
+    // Check if we should use direct API or Gateway
+    const useDirectAPI = process.env.USE_DIRECT_API === 'true';
+    const googleApiKey = process.env.GOOGLE_API_KEY;
     const gatewayUrl = process.env.GENERATE_GATEWAY_URL || process.env.GATEWAY_URL;
     const gatewayToken = process.env.GATEWAY_TOKEN;
     
-    if (!gatewayUrl || !gatewayToken) {
-      return new Response(
-        JSON.stringify({ 
-          error: 'Gateway не настроен',
-          message: 'Установите GENERATE_GATEWAY_URL и GATEWAY_TOKEN в переменных окружения.' 
-        }), 
-        { 
-          status: 500,
-          headers: { 'Content-Type': 'application/json' }
-        }
-      );
+    let apiUrl, headers;
+    
+    if (useDirectAPI) {
+      // Use direct Google API
+      if (!googleApiKey) {
+        return new Response(
+          JSON.stringify({ 
+            error: 'API не настроен',
+            message: 'Установите GOOGLE_API_KEY в переменных окружения.' 
+          }), 
+          { 
+            status: 500,
+            headers: { 'Content-Type': 'application/json' }
+          }
+        );
+      }
+      apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image:generateContent?key=${googleApiKey}`;
+      headers = {
+        'Content-Type': 'application/json'
+      };
+      console.log('[GENERATE] Using DIRECT Google API (no Gateway)');
+    } else {
+      // Use Cloudflare Gateway
+      if (!gatewayUrl || !gatewayToken) {
+        return new Response(
+          JSON.stringify({ 
+            error: 'Gateway не настроен',
+            message: 'Установите GENERATE_GATEWAY_URL и GATEWAY_TOKEN в переменных окружения.' 
+          }), 
+          { 
+            status: 500,
+            headers: { 'Content-Type': 'application/json' }
+          }
+        );
+      }
+      apiUrl = gatewayUrl;
+      headers = {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${gatewayToken}`,
+        'X-Cost-Optimization': 'generate-only'
+      };
+      console.log('[GENERATE] Using Cloudflare Gateway');
     }
 
     // Convert files to base64
