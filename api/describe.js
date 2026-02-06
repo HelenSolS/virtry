@@ -53,7 +53,7 @@ export default async function handler(request) {
           }
         );
       }
-      apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${googleApiKey}`;
+      apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${googleApiKey}`;
       headers = {
         'Content-Type': 'application/json'
       };
