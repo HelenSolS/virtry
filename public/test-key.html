@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Проверка API ключа</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-50 p-8">
+    <div class="max-w-2xl mx-auto">
+        <div class="bg-white rounded-lg shadow-lg p-8">
+            <h1 class="text-3xl font-bold text-gray-800 mb-6">
+                🔑 Проверка Google API Key
+            </h1>
+            
+            <div id="status" class="mb-6 p-4 rounded-lg bg-gray-100">
+                <p class="text-gray-600">Нажмите кнопку для проверки ключа...</p>
+            </div>
+
+            <button 
+                onclick="testKey()" 
+                class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-lg transition-colors">
+                Проверить API ключ
+            </button>
+
+            <div id="result" class="mt-6 hidden">
+                <h2 class="text-xl font-bold mb-2">Результат:</h2>
+                <pre id="response" class="bg-gray-100 p-4 rounded-lg overflow-auto max-h-96 text-sm"></pre>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        async function testKey() {
+            const statusDiv = document.getElementById('status');
+            const resultDiv = document.getElementById('result');
+            const responseDiv = document.getElementById('response');
+
+            // Show loading
+            statusDiv.innerHTML = `
+                <div class="flex items-center">
+                    <div class="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600 mr-3"></div>
+                    <p class="text-gray-600">Проверяю ключ...</p>
+                </div>
+            `;
+            resultDiv.classList.add('hidden');
+
+            try {
+                // Create test FormData with dummy image
+                const testBlob = new Blob(['test'], { type: 'image/jpeg' });
+                const formData = new FormData();
+                formData.append('outfit', testBlob, 'test.jpg');
+
+                console.log('🔑 Testing /api/describe endpoint...');
+
+                const response = await fetch('/api/describe', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    // Success!
+                    statusDiv.innerHTML = `
+                        <div class="bg-green-100 border border-green-400 p-4 rounded-lg">
+                            <p class="text-green-800 font-bold text-xl">✅ КЛЮЧ ПРИНЯТ!</p>
+                            <p class="text-green-700 mt-2">API работает корректно</p>
+                        </div>
+                    `;
+                } else {
+                    // Error
+                    statusDiv.innerHTML = `
+                        <div class="bg-red-100 border border-red-400 p-4 rounded-lg">
+                            <p class="text-red-800 font-bold text-xl">❌ КЛЮЧ НЕ ПРИНЯТ</p>
+                            <p class="text-red-700 mt-2">${data.error || 'Неизвестная ошибка'}</p>
+                        </div>
+                    `;
+                }
+
+                // Show response
+                resultDiv.classList.remove('hidden');
+                responseDiv.textContent = JSON.stringify(data, null, 2);
+
+            } catch (error) {
+                statusDiv.innerHTML = `
+                    <div class="bg-red-100 border border-red-400 p-4 rounded-lg">
+                        <p class="text-red-800 font-bold text-xl">❌ ОШИБКА СОЕДИНЕНИЯ</p>
+                        <p class="text-red-700 mt-2">${error.message}</p>
+                    </div>
+                `;
+
+                resultDiv.classList.remove('hidden');
+                responseDiv.textContent = error.stack;
+            }
+        }
+    </script>
+</body>
+</html>
